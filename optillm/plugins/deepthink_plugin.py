@@ -1,15 +1,7 @@
-"""
-Deep Think Plugin for OptILM
-
-Combines SELF-DISCOVER framework with uncertainty-routed chain-of-thought
-for enhanced reasoning in large language models.
-"""
-
 import logging
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, Optional
 from optillm.plugins.deepthink import SelfDiscover, UncertaintyRoutedCoT
 
-# Plugin identifier for optillm
 SLUG = "deepthink"
 
 logger = logging.getLogger(__name__)
@@ -19,30 +11,11 @@ def run(
     initial_query: str, 
     client, 
     model: str, 
-    request_config: Dict[str, Any] = None
+    request_config: Optional[Dict[str, Any]] = None
 ) -> Tuple[str, int]:
-    """
-    Main entry point for the Deep Think plugin.
-    
-    Combines SELF-DISCOVER reasoning structure discovery with 
-    uncertainty-routed chain-of-thought generation.
-    
-    Args:
-        system_prompt: System prompt for the model
-        initial_query: User's initial query/problem
-        client: OpenAI-compatible client instance
-        model: Model identifier
-        request_config: Additional configuration parameters
-        
-    Returns:
-        Tuple of (response_text, completion_tokens_used)
-    """
     logger.info("Starting Deep Think reasoning process")
-    
-    # Extract configuration parameters
     config = _parse_config(request_config or {})
     
-    # Initialize components
     self_discover = SelfDiscover(
         client=client,
         model=model,
@@ -58,15 +31,13 @@ def run(
     )
     
     total_tokens = 0
-    
-    # Stage 1: SELF-DISCOVER reasoning structure (if enabled)
     reasoning_structure = None
+    
     if config["enable_self_discover"]:
         logger.info("Discovering task-specific reasoning structure")
-        
         discovery_result = self_discover.discover_reasoning_structure(
             task_description=_extract_task_description(initial_query, system_prompt),
-            task_examples=None  # Could be enhanced to extract examples
+            task_examples=[]
         )
         
         reasoning_structure = discovery_result["reasoning_structure"]
@@ -187,20 +158,15 @@ def _extract_task_description(initial_query: str, system_prompt: str) -> str:
 def _create_enhanced_prompt(
     system_prompt: str,
     initial_query: str, 
-    reasoning_structure: Dict[str, Any] = None,
-    config: Dict[str, Any] = None
+    reasoning_structure: Optional[Dict[str, Any]] = None,
+    config: Optional[Dict[str, Any]] = None
 ) -> str:
-    """Create an enhanced prompt that incorporates the reasoning structure."""
-    
-    base_prompt = f"""System: {system_prompt}
-
-Task: {initial_query}"""
+    base_prompt = f"System: {system_prompt}\n\nTask: {initial_query}"
     
     if reasoning_structure:
         import json
         structure_text = json.dumps(reasoning_structure, indent=2)
-        
-        enhanced_prompt = f"""{base_prompt}
+        return f"""{base_prompt}
 
 REASONING STRUCTURE:
 Please follow this discovered reasoning structure to solve the problem systematically:
@@ -220,7 +186,7 @@ INSTRUCTIONS:
 
 Based on my systematic analysis, the answer is:"""
     else:
-        enhanced_prompt = f"""{base_prompt}
+        return f"""{base_prompt}
 
 INSTRUCTIONS:
 Please solve this problem using careful step-by-step reasoning.

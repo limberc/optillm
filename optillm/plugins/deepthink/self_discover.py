@@ -1,31 +1,16 @@
-"""
-SELF-DISCOVER Framework Implementation
-
-This module implements the SELF-DISCOVER framework for automatically discovering
-task-intrinsic reasoning structures.
-"""
-
 import json
 import logging
 import re
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from .reasoning_modules import get_all_modules, get_module_descriptions
+from .utils import create_completion
 
 logger = logging.getLogger(__name__)
 
 class SelfDiscover:
-    """
-    Implementation of the SELF-DISCOVER framework.
-
-    The framework operates in two stages:
-    1. Stage 1: Discover task-specific reasoning structure (SELECT, ADAPT, IMPLEMENT)
-    2. Stage 2: Use discovered structure to solve problem instances
-    """
-
-    def __init__(self, client, model: str, max_tokens: int = 16382, request_config: Dict[str, Any] = None):
+    def __init__(self, client, model: str, max_tokens: int = 16382, request_config: Optional[Dict[str, Any]] = None):
         self.client = client
         self.model = model
-        # Read max_completion_tokens (preferred) or max_tokens (deprecated) from request_config
         if request_config:
             self.max_tokens = request_config.get('max_completion_tokens') or request_config.get('max_tokens', max_tokens)
         else:
@@ -33,7 +18,7 @@ class SelfDiscover:
         self.reasoning_modules = get_all_modules()
         self.completion_tokens = 0
         
-    def discover_reasoning_structure(self, task_description: str, task_examples: List[str] = None) -> Dict[str, Any]:
+    def discover_reasoning_structure(self, task_description: str, task_examples: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Stage 1: Discover reasoning structure for the given task.
         
@@ -65,15 +50,10 @@ class SelfDiscover:
             "completion_tokens": self.completion_tokens
         }
     
-    def _select_modules(self, task_description: str, task_examples: List[str] = None) -> List[Dict[str, Any]]:
-        """SELECT: Choose relevant reasoning modules for the task."""
-        
+    def _select_modules(self, task_description: str, task_examples: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         module_descriptions = get_module_descriptions()
         modules_text = "\n".join([f"{i+1}. {desc}" for i, desc in enumerate(module_descriptions)])
-        
-        examples_text = ""
-        if task_examples:
-            examples_text = "\n\nTask examples:\n" + "\n".join([f"Example {i+1}: {ex}" for i, ex in enumerate(task_examples)])
+        examples_text = "\n\nTask examples:\n" + "\n".join([f"Example {i+1}: {ex}" for i, ex in enumerate(task_examples)]) if task_examples else ""
         
         select_prompt = f"""You are an expert in problem-solving and reasoning. Given a task description and available reasoning modules, select the most relevant modules that would be useful for solving this type of task.
 
@@ -93,7 +73,8 @@ Example response format: [1, 5, 9, 15, 23]
 
 Selected modules (JSON array only):"""
 
-        response = self.client.chat.completions.create(
+        response = create_completion(
+            client=self.client,
             model=self.model,
             messages=[{"role": "user", "content": select_prompt}],
             max_tokens=1024,
@@ -135,14 +116,9 @@ Selected modules (JSON array only):"""
             # Fallback to first few modules
             return self.reasoning_modules[:5]
     
-    def _adapt_modules(self, selected_modules: List[Dict[str, Any]], task_description: str, task_examples: List[str] = None) -> List[str]:
-        """ADAPT: Rephrase modules to be more task-specific."""
-        
+    def _adapt_modules(self, selected_modules: List[Dict[str, Any]], task_description: str, task_examples: Optional[List[str]] = None) -> List[str]:
         modules_text = "\n".join([f"- {module['description']}" for module in selected_modules])
-        
-        examples_text = ""
-        if task_examples:
-            examples_text = "\n\nTask examples:\n" + "\n".join([f"Example {i+1}: {ex}" for i, ex in enumerate(task_examples)])
+        examples_text = "\n\nTask examples:\n" + "\n".join([f"Example {i+1}: {ex}" for i, ex in enumerate(task_examples)]) if task_examples else ""
         
         adapt_prompt = f"""You are an expert in adapting general reasoning strategies to specific tasks. Given the selected reasoning modules and task description, rephrase each module to be more specific and tailored to this particular type of task.
 
@@ -157,9 +133,10 @@ Instructions:
 3. Use terminology and concepts relevant to the task domain
 4. Make the adapted descriptions more concrete and specific
 
-Provide the adapted modules as a numbered list:"""
+        Provide the adapted modules as a numbered list:"""
 
-        response = self.client.chat.completions.create(
+        response = create_completion(
+            client=self.client,
             model=self.model,
             messages=[{"role": "user", "content": adapt_prompt}],
             max_tokens=2048,
@@ -191,14 +168,9 @@ Provide the adapted modules as a numbered list:"""
         
         return adapted_modules
     
-    def _implement_structure(self, adapted_modules: List[str], task_description: str, task_examples: List[str] = None) -> Dict[str, Any]:
-        """IMPLEMENT: Create a structured reasoning plan in JSON format."""
-        
+    def _implement_structure(self, adapted_modules: List[str], task_description: str, task_examples: Optional[List[str]] = None) -> Dict[str, Any]:
         modules_text = "\n".join([f"{i+1}. {module}" for i, module in enumerate(adapted_modules)])
-        
-        examples_text = ""
-        if task_examples:
-            examples_text = "\n\nTask examples:\n" + "\n".join([f"Example {i+1}: {ex}" for i, ex in enumerate(task_examples)])
+        examples_text = "\n\nTask examples:\n" + "\n".join([f"Example {i+1}: {ex}" for i, ex in enumerate(task_examples)]) if task_examples else ""
         
         # Provide a demonstration of a reasoning structure
         demo_structure = """{
@@ -236,7 +208,8 @@ Instructions:
 
 Valid JSON reasoning structure:"""
 
-        response = self.client.chat.completions.create(
+        response = create_completion(
+            client=self.client,
             model=self.model,
             messages=[{"role": "user", "content": implement_prompt}],
             max_tokens=2048,
@@ -416,7 +389,8 @@ Instructions:
 
 Based on my systematic analysis using the reasoning structure, the answer is:"""
 
-        response = self.client.chat.completions.create(
+        response = create_completion(
+            client=self.client,
             model=self.model,
             messages=[{"role": "user", "content": solve_prompt}],
             max_tokens=self.max_tokens,
